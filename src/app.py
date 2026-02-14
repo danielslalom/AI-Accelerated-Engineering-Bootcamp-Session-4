@@ -11,16 +11,77 @@ from fastapi.responses import RedirectResponse
 import os
 from pathlib import Path
 
+
+from typing import List, Dict, Optional
+from pydantic import BaseModel
+
 app = FastAPI(title="Slalom Capabilities Management API",
-              description="API for managing consulting capabilities and consultant expertise")
+              description="API for managing consulting capabilities, consultant expertise, and project assignments")
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
 
-# In-memory capabilities database
+ # In-memory capabilities database
 capabilities = {
+     # In-memory projects database
+    projects = {}
+
+
+    # --- Data Models ---
+    class ProjectAssignment(BaseModel):
+        consultant_email: str
+        capability: str
+        hours: float
+        cost_per_hour: float
+
+    class Project(BaseModel):
+        name: str
+        client: str
+        assignments: List[ProjectAssignment] = []
+
+        @property
+        def total_cost(self):
+            return sum(a.hours * a.cost_per_hour for a in self.assignments)
+
+        @property
+        def total_hours(self):
+            return sum(a.hours for a in self.assignments)
+    @app.get("/projects")
+    def get_projects():
+        """Get all projects and their assignments"""
+        return {name: {
+            "client": proj.client,
+            "assignments": [a.dict() for a in proj.assignments],
+            "total_hours": proj.total_hours,
+            "total_cost": proj.total_cost
+        } for name, proj in projects.items()}
+
+
+    @app.post("/projects")
+    def create_project(name: str, client: str):
+        if name in projects:
+            raise HTTPException(status_code=400, detail="Project already exists")
+        projects[name] = Project(name=name, client=client)
+        return {"message": f"Project '{name}' for client '{client}' created."}
+
+
+    @app.post("/projects/{project_name}/assign")
+    def assign_consultant_to_project(project_name: str, assignment: ProjectAssignment):
+        if project_name not in projects:
+            raise HTTPException(status_code=404, detail="Project not found")
+        # Optionally: validate consultant and capability exist
+        projects[project_name].assignments.append(assignment)
+        return {"message": f"Assigned {assignment.consultant_email} to {project_name} for {assignment.hours} hours at ${assignment.cost_per_hour}/hr."}
+
+
+    @app.get("/projects/{project_name}/cost")
+    def get_project_cost(project_name: str):
+        if project_name not in projects:
+            raise HTTPException(status_code=404, detail="Project not found")
+        proj = projects[project_name]
+        return {"project": project_name, "total_hours": proj.total_hours, "total_cost": proj.total_cost}
     "Cloud Architecture": {
         "description": "Design and implement scalable cloud solutions using AWS, Azure, and GCP",
         "practice_area": "Technology",
